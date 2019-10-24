@@ -1,0 +1,1860 @@
+\section{Relational Decomposition}\label{sec:model}
+
+% We don't *know* the actual connections to do a CRF (not to mention we need to 
+% know the structure). 
+
+
+% https://stackoverflow.com/questions/1812214/latex-optional-arguments
+
+% https://tex.stackexchange.com/questions/43008/absolute-value-symbols
+% https://tex.stackexchange.com/questions/94410/easily-change-behavior-of-declarepaireddelimiter
+
+% control-flow, dependence, and dataflow analysis
+
+%Var2Vec
+%
+%We can use Transformer-like architecture, starting with the Var2Vec 
+%representation embeddings, to then give better embeddings to finally use for 
+%variable name decoding or something.
+%
+%Identifying places in code that can be pulled out into a local variable?
+%
+%Declarations are the first use, so anything that isn't a part of a declaration 
+%must be a new variable.
+%
+%Program Repair: try to exclude bugs from the representation
+%
+%Topology vs properties: DRNN is specifically about topology. Capturing the 
+%topology in the encoding is just as important as in the decoding, (including 
+%labeling a node as a leaf / last sibling?)
+%
+%Thinking about how one could use it for encoding and decoding can be helpful.
+%
+%
+%Tree canonicalization/canonization
+%
+%Introducig forward edges in linear sequences (like REP does) is really just 
+%making a tree out of linear sequences
+%
+%Every node should have an input and output from the relation, though it may 
+%output the same value to multiple.
+%
+%Directionality matters when we might want to make a trade off between minimum 
+%number of changes and most likely tree when doing beam search.
+%
+%Fix to beam search that includes division?
+%
+%TreeLSTM: prediction vs embedding. Also, concatenating top-downn annd bottom-up, 
+%vs passing result of top-down to a bottom-up phase to  get a single embedding
+%
+%Directions through tree can be run in parallel, where only the hpred summation 
+%at the end to make a prediction takes a second
+%
+%Could have just Compound require topology prediction,  but meh
+%
+%Tasks: Can completely look at input, can only condition on what we're sure of 
+%about output (which is basically output).
+%
+%Only one bug vs multiple bugs
+%
+%(Bi/Uni)directional (en/de)coding with attention
+%
+%Unidirectional decoding: easy to generate a sequence, though requires beam 
+%search. Probabilistically intuitive. Holes in the middle are difficult to fill 
+%in because we still have to calculate the probability of the "known" sequence 
+%after the hole
+%
+%Self-Attention: can only be over output decoded so far.
+%
+%Bidirectional decoding: directly take into account stuff known at the end of the 
+%output. No longer probabilistically intuitive, though, and requires looking at 
+%tshe problem in a different way.
+%
+%Self-Attention: Hmmm...Hasn't been studied directly yet in generative models?
+%
+%Asymmetric. If we assume recurrence/transitivity, then we have a strict partial 
+%order
+%
+%Union is an extension. Also can take composition (aunt/uncle is defined as 
+%sibling of parent)
+%
+%Random walks?
+%
+%Unidirectional LSTM:
+%
+%Unidirectional encoding:
+%
+%Self-attention
+%
+%Bidirection encoding:
+%
+%Self-Attention
+%
+%Cross-Attention
+%
+%Filling in holes is now a Gibb's
+%
+%Our decoder serves as encoder for the next step.
+%
+%Unidirectional: Excludes information. Example of bug at beginning vs end of 
+%code.
+%+ Attention. Basically We can only attend to things in a unidirectional way, 
+%since we can't looked at the future. Resolves the issue of
+%
+%1) Unidirectional, excludes information, requires beam search, but  
+%probabilistically intuitive
+%4) Unidirectional attentive: can completely look at input, but for generative 
+%purposes
+%2) Shallow bidirectional concatenation: now, we no longer to calculate the 
+%probabilities on the other side of a hole, but how to fill in a hole is 
+%nonobvious (gibb's sampling?)
+%3) Bidirectional attentive: BERT. We would need to know in advance which parts 
+%of the tree could also be wrong so we don't use them to condition. Also can't 
+%train directly--need to use the masked language model approach. When trying to 
+%fill in a hole of arbitrary length by generating, we can no longer use the
+%
+%Does attention throw away directional information
+%
+% Skip/residual connections
+%
+%
+%On the way forward, we could apply MLM to bidirectional concatenation appraoch?
+%bidirectional approach? Would have to put multiple masks in there?
+%
+%If we don't make a language model that needs to predict the "next" token, then 
+%we can use attention directly.
+%
+%Fully generating output, identifying anomalies in the input (unsupervised), 
+%filling in holes in output (based on either input or complete different 
+%output?), just classifying, generic embedding
+%
+%We know for most of the tree elements whether we have all the siblings, yes??
+
+% defs .................................................................... {{{1
+%\DeclarePairedDelimiter\size{\lvert}{\rvert}
+%\DeclarePairedDelimiter\parens{\lparen}{\rparen}
+%\DeclarePairedDelimiter\curly{\lbrace}{\rbrace}
+\newcommand{\parens}[1]{\ensuremath{\left(#1\right)}}
+\newcommand{\curly}[1]{\ensuremath{\left\{#1\right\}}}
+\newcommand{\size}[1]{\ensuremath{\left\lvert#1\right\rvert}}
+
+\newcommand{\set}[2]{\curly{#1\mid#2}}
+\newcommand{\prob}[1]{\ensuremath{P\parens{#1}}}
+\newcommand{\pprob}[1]{\ensuremath{\Phi_\vtheta\parens{#1}}}
+\newcommand{\cprob}[2]{\ensuremath{P\parens{#1\mid#2}}}
+\newcommand{\gstep}[1]{g\parens{#1}}
+
+\def\model{\phi}
+\def\modelt{\phi_{\vtheta}}
+\def\graphs{\sG}
+\def\graph{\gG}
+\def\edges{E}
+\def\ee{e}
+\def\ev{v}
+\def\er{r}
+\def\nodes{V}
+\def\relations{\gR}
+\def\numrels{\size{\relations}}
+\def\numnodes{\size{\nodes}}
+\def\numdim{k}
+\def\dataset{\gD}
+\def\trees{\sT}
+\def\tree{t}
+
+% markov blankets
+\def\mbv{\gM}
+\newcommand{\mb}[1][V_i]{\ensuremath{{\rm MB}\parens{#1}}}
+
+\def\robs{\ensuremath{\mathbf{\gO}}}
+\def\obss{\ensuremath{\rmO}}
+\def\obs{\ensuremath{o}}
+\def\rinputs{\ensuremath{\mathbf{\gX}}}
+\def\rinputslen{\ensuremath{\mathbf{\gN}}}
+\def\inputs{\ensuremath{\rmX}}
+\def\outputs{\ensuremath{\rmY}}
+\def\routputs{\ensuremath{\mathbf{\gY}}}
+\def\routputslen{\ensuremath{\mathbf{\gM}}}
+
+\def\input{\ensuremath{x}}
+\def\inputlen{\ensuremath{n}}
+\def\output{\ensuremath{y}}
+\def\outputlen{\ensuremath{m}}
+
+\def\graphin{\ensuremath{\graph_X}}
+\def\graphout{\ensuremath{\graph_Y}}
+\def\cross{\times}
+\newcommand{\truedistxy}{\ensuremath{\rmP\parens{\rinputs=\input,\routputs=\output}}}
+\newcommand{\truedist}[1]{\ensuremath{\rmP\parens{#1}}}% ................. }}}1
+
+\subsection{Notation} 
+% ................................................... {{{1
+
+% TODO: TreeLSTM but with the node starting one earlier for predictive purposes.
+Let $\relations$ be the categorical set of possible edge labels (relations) in a 
+graph.  For example, different edge labels can be used to distinguish the parent 
+of a node from a sibling.
+Many graphs may only have a single edge label.  We will often use the terms 
+edge, edge label, and relation interchangeably.
+
+A (finite, directed) graph $\graph \in \graphs$ has the form 
+$\graph=\parens{\nodes,\edges}$, where $\nodes=\set{\ev_i \in \sR^\numdim}{1\leq 
+i \leq T}$ is a finite set of $\numnodes=T$ real-valued vectors of length 
+$\numdim$, and
+$\edges\subseteq\numnodes\times\numnodes\times\numrels$ is the set of edges 
+between vertices such that $\ee^r_{ij}\in\edges$ indicates a directed edge of 
+type $\er$ from $\ev_i$ to $\ev_j$.\footnote{Because of the multiple edge 
+labels, this is really a labeled multidigraph, or labeled quiver. We will stick 
+to the term \textit{graph} throughout the paper.} Paths and cycles take on the 
+usual meanings, with the clarificationn that they may contain edges of differing 
+labels.  We use the qualifier ``labeled'' to describe a path or cycle that 
+strictly follows edges of a single label.
+
+%In an undirected graph, $\ee^r_{ij}\iff\ee^r_{ji}$.
+%In the general case of a graph, edges may themselves have weights, but such a 
+%graph can be (invertibly) transformed into one with vertex-only weights by 
+%adding additional vertices in the middle of edges.
+
+For our purposes, a tree $\tree\in\trees\subset\graphs$ is a restricted graph 
+with no cycles and a single root vertex (given by $t^*$).
+
+% ................ }}}1
+
+\subsection{Implicit Structure learning}
+% .................................. {{{1
+
+We have a dataset $\dataset$ of $D$ labeled observations: 
+$\dataset=\set{\parens{x^i,y^i}}{x^i\in\inputs,y^i\in\outputs,\1\leq{}i \leq{} 
+D}$. $\inputs$ and $\outputs$ are the sets of all possible inputs (features) and 
+outputs (labels), respectively.\footnote{In the unlabeled case, we can treat 
+$\outputs$ as some singleton set.} Each datapoint is drawn from some underlying 
+probability distribution $\truedistxy$, where $\rinputs$ and $\routputs$ are 
+random variables over $\inputs$ and $\outputs$, respectively.
+
+Without loss of generality, we momentarily restrict the members of $\inputs$ and 
+$\outputs$ to sequences of vectors.\footnote{A scalar is a vector of length $1$, 
+	a vector is a sequence of length $1$, and a graph can be encoded as a sequence 
+of vertices followed by a sequence of edges.} Similarly, our random variables 
+are now sets of random variables:
+$\rinputs=\curly{\rinputslen=\inputlen,\rinputs_{1},\ldots\rinputs_\inputlen}$ 
+and 
+$\routputs=\curly{\routputslen=\outputlen,\routputs_{1},\ldots\routputs_{\outputlen}}$.  
+We will often omit $\rinputslen$ and $\routputslen$, assuming 
+$\rinputslen=\inputlen$ and $\routputslen=\outputlen$, but in the general case, 
+we also need to predict the length of the sequences.\footnote{If the sequence 
+encodes a graph, this generalizes to predicting the topology of the graph.}
+
+Given no expert insight into the dataset, we have no \textit{a priori} knowledge 
+of how the components of $\rinputs$ and $\routputs$ are inter- and 
+intra-related.  There can be arbitrarily complex probabilistic dependencies 
+between the $n+m$ elements, 
+%and all subsets of the vertices of the graph are potentially conditionally 
+%dependent on the remaining vertices of the graph.
+
+%To solve some task, we wish to estimate some set of probability distribution 
+%$f\parens{\rinputs,\routputs}$. For example, we may be interested in a 
+%discriminative model for 
+%$f\parens{\rinputs,\routputs}=\truedist{\routputs=\output\mid\rinputs=\input}$.
+
+
+%the Bayesian network graph would default to some directed acyclic graph (DAG) 
+%with all components connected.
+
+If we use a standard, unidirectional RNN sequence-to-sequence encoder-decoder 
+model, we can theoretically capture all dependencies. The dependencies 
+themselves are implicit in the parameters and operations of the RNN and encoded 
+in the hidden states returned by the RNN\@. However, we must choose some 
+ordering in which to encode the inputs and decode the outputs. This ordering may 
+not be an optimal factorization of the joint probability, increasing the number 
+of dependencies that must be learned.\footnote{Here, an optimal factorization is 
+	loosely defined as minimizing the number of variables being conditioned on 
+across all factors, or more generally, minimizing some cost function over those 
+variables. This is equivalent to minimizing the number of (or cost function over 
+the) edges in a Bayesian network.}	Furthermore, the dependencies may be 
+separated by arbitrarily long distances. For example, the last output may depend 
+heavily on the first input. Finally, the width of the hidden layers, number of 
+hidden layers, time to train, and/or size of the dataset may become prohibitive 
+to learning the implicit dependencies.
+
+% Separately, the chosen direction may work well for predicting some distributions 
+% and poorly for others (akin to No Free 
+% % TODO: cite
+% Lunch); we'll return to this point in section XXX.
+
+% A shallow bidirectional encoder, in which we concatenate a forward-encoding and 
+% backwards-encoding of the inputs, . We hold off discussion of bidirectional 
+% decoding until section XXX.
+
+To resolve this, we attempt to apply prior knowledge to our model, lifting the 
+restriction that $\inputs$ and $\outputs$ are sequences. Now, with $\inputs 
+\subseteq \graphs$ and $\outputs \subseteq \graphs$,~\footnote{We can readily 
+encode scalars, vectors, and sequences as graphs.} we can encode our \textit{a priori} knowledge with the addition and removal of 
+edges from the graphs. For example, we can extend an abstract syntax tree with 
+edges connecting instances of the same variable. We assign these edges a new 
+label, such that this ``same variable'' relation is distinct from the edges 
+representing the backbone of the AST\@.  
+%;  we are willing to pay a bit more for our lunch. For example, if we know that 
+%each element only depends on the immediately prior element in the (Markovian) 
+%sequence, we do not need a recurrent neural network.
+
+%This is akin to structure learning.  Bayesian networks can be constructured by 
+%hand or inferred, but here, intractable, and we don't know the latent 
+%variables.  Similar CRF.
+
+\subsection{Relational Decomposition}
+% .................................................. {{{1
+
+Within a graph $\graph=(\nodes,\edges)$, a relation is some subset of all 
+possible ordered pairs of vertices $\nodes\times\nodes$. If we label that subset 
+$\er$, then $\forall (\vv_i, \vv_j)\in\er, e_{ij}^r\in\edges$.  For example, we 
+can define a parent relation $p$ such that if $\vv_i$ is the parent of $\vv_j$, 
+then $e_{ij}^p\in\edges$. We can add arbitrarily many relations and labeled 
+edges to the original graph. With relations representing dependencies, a 
+completely connected graph reflects no prior knowledge. A \textit{relational 
+decomposition} of a graph is any subset of the possible relations.
+
+We represent the flow of information through a relation as a recurrence. At 
+vertex $\vv_i$, for any relation $r$, we have:
+\begin{equation}
+	\vh^r_i = g^r\left(\set{\left(\vh^r_j, \vv_{j}\right)}{e_{ij}^r\in\edges} 
+\right)
+\end{equation}
+
+$g^r$ can be any function. Here, we choose to model the relational dependence 
+with some form of neural network. If the relation is linear and acyclic, $g^r$ 
+can be a step taken by a standard RNN\@. If $\vv_i$ has more than one edge with 
+label $r$, such as a parent having multiple children in a tree, we instead apply 
+a TreeLSTM cell. If the relation is not acyclic, we can use some graph-based 
+neural network.
+
+%If relation $r$ is acyclic, then $h_i^r$ will terminate with some base case for 
+%which there is no edge to follow. If $r$ is transitive, such that we want XYZ, 
+%then $g^r$ can be given by a step of a recurrent neural network. If there is 
+%just one input, a standard RNN suffices. If there are multiple neighbors with 
+%the same relation, then we can use a form of TreeLSTM\@.  Alternatively, we may 
+%want to model trasitivity by connecting nodes directly throughout the linenage.  
+%If $r$ is intransitive, then a recurrence is not necessary. In this case, the 
+%relation forms a strict partial order, from which we can derive a topological 
+%sort and iterate over the tree in constant time.
+
+For the rest of the paper, we assume that all individual relations are directed 
+and acyclic (i.e., DAGs), though relational decomposition itself is not 
+restricted to DAGs.  For the base case of the recurrence, in which $\vv_i$ has 
+no $r$-edges, we usually pull from some other relation. For example, the base 
+case of a decoder recurrence can often be set to the end result of an encoder 
+recurrence.  Otherwise, we can set the base case to some parameterized vector 
+$\rvh_0$ learned during training.
+
+At vertex $\vv_i$, our final vector is some aggregation of the relational 
+decomposition. For example, in many cases we use:
+\begin{equation}
+	\vh^\star_i \equiv \tanh\left(\sum_{r \in R}\left.\rmU^r \vh^r_i\right.\right)
+\end{equation}
+
+where the $\rmU^r$ are parameters to the model. Other times, we instead choose 
+to concatenate the individual $\vh_i^r$ (as is standard in linear bidirectional 
+encodings). $\vh^\star_i$ can either be used to make predictions directly at 
+$\vv_i$, such as predicting its label or topology, or passed along as an 
+embedding for some other task.
+
+Note that the individual recurrences are \textit{independent} from one another.  
+If $e_{ki}^r\in\edges$, $\vh_k^r$ will not have any information from 
+$\vh^\star_i$ outside of the $\vh^r_i$ component.
+
+\subsection{Relational Thinking}
+
+Once we start thinking of inputs and outputs in terms of relations, we can often 
+readily define new relations (with their own RNNs) in terms of old ones.  Even 
+in the general case, union, composition, intersection, and converse operators 
+can be applied to relations. With more constraints, more relational operators 
+become available.
+
+For example, if a relation $r$ is a strict partial order, then we can construct 
+a new relation $r'$ as the transitive closure of $r$. Equipped with standard 
+mapping and folding operators, we can readily add attention to a standard 
+seq2seq model by folding over the transitive closure of the single edge
+connecting the encoder output to the decoder input. We can then add in 
+bidirectionality to the encoder by taking its converse.\footnote{Technically, we 
+	must also define $\vh_{encoder}^\star$ as the concatenation of the two forward 
+and reverse encodings. In our implementation, this is the default behavior when 
+the union of two relations would no longer be acyclic, as in this case.}
+
+%Tree-specific-stuff
+% ......................................................................... {{{2
+
+When we know that a relation is a tree, we can readily add relational operators 
+to construct edges between siblings, across all leaves, between a node and its 
+inorder-success given a depth-first search traversal, and so on.
+
+Compositions are more useful in this case than in the sequential. For example, 
+we can readily compose a parent and left sibling relation to describe a relation 
+between a node and an aunt or uncle. Transitive closure then captures all of the 
+parent's younger sibligns.
+
+As in the sequential case, bidirectionality in decoders over trees must be 
+carefully approached.  In a sequence, a relation can be classified as either a 
+forward or backwards relation. The union of relations from different classes 
+(over the same vertices) results in a
+bidrectional (cyclical) relation.  Generalizing to trees, there are eight 
+relational classes
+corresponding to possible topological sorts (depth-first or breadth-first, 
+leftt-to-right or right-to-left).  We elide further discussion here, except to 
+point out that a framework built on relational decomposition can validate 
+appropriate bidirectional usage.
+
+%Topology prediction: depends on directionality of the topological sort. A
+%right-to-left flow isn't helpful in identifying whether a node is the right-most 
+%sibling.
+
+%Relation classes:
+%Height: top-down, bottom-up
+%Width: left-right, right-left
+
+%If we are decoding in one pass over the tree,
+
+%Natural topological orders over the tree correspond to, e.g., top-down, 
+%left-to-right.
+
+%This is important, because they decode in breadth-first order, and we use 
+%depth-first.
+
+%8 options for single-pass directionality
+%First height then width (4 options), or first width then height (4 options)
+%Written as binary trees, but generalizes
+%Depth-first:
+%NLR (preorder): top-down, then left-right (bottom-up dependence of a left-right relation allowed)
+%LNR (inorder): left-right, then bottom-up (right-left dependence of a bottom-up relation allowed)
+%LRN (postorder): bottom-up, then left-right
+%NRL (reverse-preorder): top-down, then right-left
+%RNL (reverse-inorder): right-left, then bottom-up
+%RLN (reverse-postorder): bottom-up, then right-left
+
+%Breadth-first:
+%LR (forward-bf): left-right, then top-down
+%RL (reverse-bf): right-left, then top-down
+
+%A tree can't be decoded if we don't have encodinged relations for at least both 
+%dimensions (height and width).
+
+%Possible relations:
+
+%Simple relations:
+%Parent: top-down
+%Subtree: bottom-up (all children combined predict parent, TreeLSTM)
+%Child: bottom-up (children predict parents independently)
+%left-child: bottom-up (binary only)
+%right-child: bottom-up (binary only)
+%left-children
+%right-children
+
+%left-sibling: left-right
+%right-siblng: right-left
+
+%Linearizations:
+%inorder-successor: left-right, then bottom-up
+%inorder-predecessor: right-left, then bottom-up
+%reverse-postorder-successor
+%reverse-bf-successor
+
+%%left sibling tree's right-most child: a (recursive) composition. Similar to 
+%%left-sibling
+
+%Composed relations:
+%Parent's left sibling: top-down, then left-right OR left-right, then top-down
+
+%Union of relations:
+%Parents and left siblings: top-down, then left-right OR left-right, then 
+%top-down
+
+%Functional relation: Places a dependency on the hidden state of another 
+%relation.
+%For decoding purposes:
+%$subtree@leftsibling$: height, then left-right (even with top-down, by the time 
+%we get to an element, we can calculate left subtree). Is this a cycle?  No, 
+%right?
+%Since the dependency only exists at a given decoding step.  So we can decode.
+%$leftsibling@parent$: width, then top-down (we need to actually make a second 
+%reverse pass on a level while doing reverse-breadth-first). So really just 
+%left-right, top-down
+%$parent@leftsibling$: top-down, then left-right OR left-right, then top-down
+
+%Implicitly, all simple relations can be thought of as $r@r$, e.g., 
+%$leftsibling@leftsibling$.
+
+%$parent@subtree$ has a cycle, though, so can't really use.
+
+%Note that a different RNN is used for higher order relations. As such, we have 
+%no ``memory'' of anything outside the sum of the children.
+
+%On trees, bottom-up is notable for being the only one that takes multiple 
+%inputs.
+% ......................................................................... }}}2
+
+
+%If relation $r$ is cyclic, then first we extract the cyclical part, within which 
+%we can use message passing, unrolling the graph for some number of time steps, 
+%randomly initializing $h_{i,0} \forall i$ and passing messages for that number 
+%of time steps (or until convergence).
+
+%We can define composition, union, intersection, and functional relations. 
+
+%Functional relation: for example, in a tree, we can define the functional 
+%relation $\texttt{leftsibling(subtree)}$, whereby the left sibling passes us the 
+%result of its own subtree component. This effectively creates a multi-edge 
+%between the left-sibling and node, but with a different function attached.  
+
+%Attention can be modeled as a type of functional relation: we add directed edges 
+%to all other nodes we wish to attend to with ``arguments'' being the set of 
+%relations to attend to. We address this point further in Section
+%%TODO \ref{}.
+%.
+
+%If a topological sort exists over the graph, then we can encode and decode the 
+%graph in that order in a single pass.
+
+
+
+%%%Temporarily restricting our view to unidirectional models, our goal is to 
+%%construct a DAG over the possible sequences. We extend this to bidirectionality 
+%%and cyclic digraphs in section XXX.
+%%
+%%% Attention, cyclic bidirectionality, shallow bidirectionality
+%%
+%%% TODO: define decomposition.
+%%
+%%The default forward-direction and reverse-direction RNNs capture just two 
+%%possible DAGs (though note that their union is not a DAG). We may form an edge 
+%%between all nouns in a sentence and all verbs in a sentence, or between 
+%%identical nouns in a sentence, and so on. The possible edge types are up to the 
+%%user.
+
+%We can either aggregate labels, combine labels with TreeLSTM, or concatenate.  
+%Aggregating labels is easier if they are topologically consistent or if the task 
+%is fine with it, e.g., attention over the bidirectionality?.
+
+%We have to learn what to pay attention to. Aka, the dependencies.
+
+%If a labelled cycle exist.
+
+%If the union of the two DAGs is still acyclic, then we say the relations are 
+%\textit{consistent}.  Note that the composition of the relations is not the same 
+%thing.	However, the composition of the relations is still a DAG
+
+%An RNN over all of the vertices necessarily captures all dependencies, but 
+%again...
+
+%Formally, an (asymmetric) relation is some directed acyclic graph. Given 
+%transitivity, this is a strict partial order.
+
+% Potentially need to give this a random initialization for MPNN to work.
+%\begin{align}
+%	%g(V_i) &= g\left(\left\{ V_k \mid k < i \right\}\right) \\
+%	%\vh_i &= g\left(\left\{ \vh_k \mid k < i \right\}\right) \\
+%	\gstep{\vv_0} &= \rvh_0
+%	\\
+%	%\gstep{\vv_i} &= \gstep{\left\{ \left(\vh_k, \vx_k\right) \mid k \neq i 
+%	%\right\}\right) \qquad \forall i > 0
+%	\gstep{\vv_i} &= \gstep{\left\{ \vv_k \mid k < i \right\}} \qquad \forall i > 0
+%	\\
+%	\gstep{\vv_i} &= \gstep{\vv_{i-1}} \qquad \forall i > 0
+%	\\
+%	\vh_i &= g\left(\vh_{i-1}, \vx_{i-1}\right) \qquad \forall i > 0
+%	\\
+%	\vh_{i,0} &= \rvh_{i,0} \qquad \forall i \in \sV
+%	\\
+%	\vh_{i,t} &= g\left(\vh_{i-1,t-1},x_{i-1}\right) \qquad \forall i \in \sV, 
+%\forall t > 0
+%	\\
+%	\vh_i &= \vh_{i,T} \qquad \forall i \in \sV
+%\end{align}
+% TODO: note about base case
+%Whether or not this includes the hidden state is one step behind depends on 
+%whether the output relies on us predictig $\vv_i$.
+
+% .................................. }}}1
+
+%\subsection{The encoder/decoder duality}
+%% ..........................................................{{{1
+
+%From the point of view of a node in a graph, we have no notion of whether we are 
+%encoding or decoding information, training or not training, etc. There just 
+%fundamentally is no edge to the future data.
+
+%Decoder with some of the output already provided should be able to encode that 
+%output.
+
+%A brief aside...
+
+%The decoder itself can affect what information the encoder can use. For example, 
+%in the case of predicting locations of bugs. An encoder that is just trying to 
+%learn an embedding, like BERT.
+
+%An encoder has access to all inputs, but we still might have to generate outputs 
+%sequentially.
+
+%First, encoders used bidirectionality, then decoders.
+
+%First, decoders used attention over encodings, then self-attention came along.
+
+%When decoding a sequence sequentially, step $n$ is really an encoder for step 
+%$n+1$. As such, when decoding, we will use the term ``input'' to also include 
+%the output from these decoder steps. % TODO
+
+%A model has inputs and outputs. That model can have multiple sub-models in 
+%composition. Something that takes in inputs and gives a temporary representation 
+%is an encoder, and something that takes in that temporary representation and 
+%gives the final output is a decoder.
+%At the extreme, we have autoencoders, where even the inputs and outputs are 
+%intended to match. Given any encoder/decoder, design an autoencoder. Often, the 
+%representation of the autoencoder is used as input to a different task's 
+%decoder, even when the autoencoder itself is trained as a decoder.
+
+%``A decoder doesn't have access to the future''
+
+%Attention splits this up even further. Now, each step of the encoder also 
+%generates data.
+
+%An attention layer is just an encoder.
+
+%The Transformer model generalizes attention. No longer do we just use attenntion 
+%to help the decoder understand the encoder embeddings. We now use attention for 
+%the encoder embeddings, and attention over the decoder embeddings as well.
+
+%At any given step, we have access to \textit{all} of the prior 
+%inputs/embeddings, in addition to just the output of the most recent step.  
+%Often, to bridge the gap, we just need to capture a notion of topology in the 
+%decoding, whether that is a special stop token, etc, to know when there is no 
+%future.
+
+%Linear bidirectional decoding.
+
+%We can have several encoders and decoders in sequence, and multi-level 
+%attention.
+
+%A single step in the decoder is really just providing encodings for the next 
+%step. As such, if thinking of the decoder as an encoder can't distinguish/ 
+%capture differences in subtrees that you need, then the model isn't strong 
+%enough. Discriminator
+
+%Encoding tricks that made it over to decoders, and vice-versa.
+
+%Now tricks that make its way from linear to trees (and vice-versa? doesn't 
+%really make sense...)
+%% ......................................................................... }}}1
+
+%Order theory.
+
+
+%Attention adds an edge back to all prior steps, again implying transitivity, but 
+%also removing the issue with remembering long distances.
+%We don't need to compose attention over \textit{all} relations.
+
+%Think of $<$ as an arrow in a DAG\@. Each $<_X$ is a different each type.
+
+%Define the union of two partially ordered sets:
+%$<_{AB}=<_A\cup<_B\iff\forall x_1 <_{AB} x_2, x_1 <_A x_2 \lor x_1 <_B x_2$.
+
+%$<_A$ and $<_B$ are consistent if the identity from $<_A$ to $<_B$ is 
+%order-embedding (within the domain of $<_B$), and vice-versa. Note that being 
+%mutual order-embeddings does not imply an order isomorphism, since the domains 
+%of the relations may differs.
+
+%Intersection
+%$\forall x_1 <_C x_2, x_1 <_A x_2 \land x_1 <_B x_2$
+%E.g., (trivially?) `my children who are also my grandchildren''
+
+%Consistent A and B can also be seen as sublattices of a larger 3D lattice that 
+%contains all consistent relations.  Within a level is all subsets that adhere to 
+%the relation.
+
+%%Consistent relations form a lattice, where $L$ is the set of vertices and $R$ 
+%%the set of all possible consistent relations. 
+
+%%Feedback arc set should be 0.
+
+
+%$<A$ and $<B$ are \textit{consistent} iff $<_{AB}$ is itself partially ordered.  
+%In that case, $\forall a_1 <_A a_2, a_1 <_B a_2$ or incomparable, and vice 
+%versa. Defined another way, $<_A$ and $_B$ are consistent iff $\exists<_{AB}$ 
+%that is an extension of both $<A$ and $<B$.
+
+%$\forall (a1,a2) \in <A, a1 <B a2$ or incomparable (not $a2 <B a1)$, and vice 
+%versa for B to A. Then $<AB=<A\cup<B$ is partially ordered. In other words, 
+%$<AB$ must be an extension of both $<A$ and $<B$. The union of two consistent 
+%posets is, by definition, order-preserving for both posets (the mapping function 
+%$f$ being the identity).  Hasse Diagram.
+
+%Topological sort is then the linear extension / total order for any partially 
+%ordered relation.
+
+%If there is no topological sort, then we must have a non-partially-ordered 
+%relation, resulting in some bidirectionality.
+
+%This formally generalizes the bidirectionality over LSTMs. A directed acyclic 
+%graph representation of the flow of dependencies has a topological sort.
+
+% Convolution?
+
+% ................................................................. }}}1
+
+%\subsection{Decomposition over abstract syntax trees}
+%% ......................................................................... {{{1
+
+%Parallel path processing. Can define a network just by defining combinationns of 
+%relations. 
+%%In our code, we have implemented generalized parent, child, left sibling, right 
+%sibling, left prior, right oprior
+
+%The assumption is that the abstract syntax tree provides a better model on which 
+%to learn the intra-dependencies in a sequence. Furthermore, if we can align an 
+%input tree to an output tree in some way, we may be able to further model 
+%inter-dependencies.
+
+%Note that it is unlikely that all dependencies may be captured by the original 
+%edges of the tree. For example, the probability of a subtree is likely dependent 
+%not just on the parent, but also on its siblings, even without a direct edge 
+%between siblings.
+
+%This imposes a strong inductive bias on the network, reducing the variance.
+
+%It also provides a systematic way of describing many prior works. See Appendix 
+%XXX.
+
+%Execute traces and provide edges based on those. Variable usage connections, 
+%since variable/state changes are what link subsequent parts of the subtree.  
+%Every node in the tree can be connected to all most-recent uses of a variable.
+
+%% However, we must choose some ordering over the inputs and outputs to feed to 
+%% the encoder and decoder, respectively. If we choose to decode the output 
+%% $\output$ in sequence order (from $\output_1$ to $\output_\outputlen$), then 
+%% we can readily provide the distribution over the last token, 
+%% $\truedist{\routputs_m=y_m 
+%% \mid\rinputs=\input,\curly{\routputs_i=y_i}_{i=1}^{m-1}}$. However, the 
+%% distribution over the first token requires evaluating the probability of the 
+%% full sequence for all possible $y_1$. While a decoder RNN trained on the 
+%% output sequence in reverse order handles the latter situation well, it 
+%% struggles with the former. And both falter if the hole is in the middle of the 
+%% sequence.
+
+%% Bayesian structure learning would model these directly
+%% Disriminative vs generative
+
+%We want to learn some model $\model\parens{\graphin ; \vtheta
+%}=\cprob{\graphout}{\graphin ; \vtheta}$.
+
+%\def\repgraph{\ensuremath{\graph^\star}}
+
+%Let's say we are trying to generate a We have 
+%$\argmax_{\graph\in\graphs}{\prob{\graph}}$.
+
+%\begin{align*}
+%\gG=V_1\rightarrow V_2\rightarrow\cdots\rightarrow V_N
+%\\
+%\gG=V_1\leftrightarrow V_2\leftrightarrow\cdots\leftrightarrow V_N
+%\end{align*}
+%An LSTM can capture the entire sequence's dependencies in its hidden state, but 
+%then we aren't taking advantage of any prior knowledge. CRF
+
+
+%Given some topological order:
+%We have a model $\Phi_\vtheta$ trained to estimate.
+%Let $\gN$ be the function that returns the neighbors of vertex $V$ in
+
+%%d-separated
+
+%\begin{align}
+%	\prob{\gG}
+%	&= \prod_{i=1}^N \cprob{V_i}{\curly{V_k}_{k=1}^{i-1}}
+%	\\
+%	&= \prod_{i=1}^N \pprob{%
+%		\curly{V_k}_{k=1}^{i-1}
+%	}
+%	\\
+%	&= \prod_{i=1}^N \pprob{V_i}
+%	\\
+%	\cprob{V_i}{\curly{V_k}_{k=1}^{i-1}}
+%	&= \cprob{V_i}{V_{i-1}}
+%	\\
+%	&= \cprob{V_i}{V_{i-1},V_{i+1}}
+%	\\
+%	\cprob{V_i}{\curly{V_k}_{k=1}^{i-1}}
+%	&= \cprob{V_i}{\curly{V_{k}}_{k=1}^{i-1}}
+%\cprob{V_i}{\curly{V_{k}}_{k=1}^{i-1}}
+%\end{align}
+
+%But if go in non-topological order, then we get:
+%Ideally Bayesian network. Let $\mb$ be the Markov Blanket relation over a node 
+%$V_i$, defined as:
+
+%\[
+%	\mbv \in \mb \iff \cprob{V_i}{\mbv, \gV-\curly{V_i}-\mbv} = \cprob{V_i}{\mbv}
+%\]
+
+%In words, $\mbv$ is a Markov Blanket of $V_i$ if and only if $V_i$ is 
+%conditionally independent from the rest of the graph given the nodes in $\mbv$.  
+
+%As a trivial example, $\gV - \curly{V_i} \in \mb$, where the Markov Blanket is 
+%the entire rest of the graph. Ideally, we would want some Markov Blanket that 
+%meets some definition of minimality.
+
+
+%Assume we have all of the vertices, but we don't know the relation between the 
+%vertices. We can learn a model 
+
+%\begin{align}
+%	\cprob{Y}{X} &= \pprob{X}
+%	\\
+%						 &= \cprob{V_i}{\curly{V_k}_{k\neq i}}
+%	\\
+%	P(V_i \mid \{V_k \mid k\neq i\})
+%	\\
+%	P(\gG \mid o_d) = \prod_{i=1}^N P(V_{o_d}\mid \{V_{o_e}\}_{1}^{d-1})
+%\end{align}
+
+%For now, assume we have a DAG
+
+%``Gap'' can either be a hole or until the end of the sequence. While decoding, 
+%it's everything we haven't decoded yet.
+
+
+%Either ignore probabilities after the fact, or things get hard, beam search, 
+%etc. In code, a greedy algorithm probably isn't enough.
+
+%For the task at hand, we need the encoder representation to shatter the 
+%function.  Two programs we should differentiate need to be distinguished.
+
+%Encoding: representations can't distinguish.
+
+%Decoding: at any step, the output of the previous decoding step can be viewed as output from an encoder.
+
+%Beam Search
+
+%Gibb's sampling
+
+%Inductive bias
+%Topological Order
+%Markov Blanket
+%Hoare Triples
+%Curse of Dimensionality
+
+%Neural Turing Machine type of connection to subtrees when variables/global state 
+%changes
+
+%Ideally encoder representation to decoded output is one to one, right?
+
+%%simplification of models to make them easier to interpret by researchers/users,[1]
+%% shorter training times,
+%% to avoid the curse of dimensionality,
+%% enhanced generalization by reducing overfitting[2] (formally, reduction of %variance[1])
+
+%% "Feature selection finds the relevant feature set for a specific target 
+%% variable whereas structure learning finds the relationships between all the % variables, usually by expressing these relationships as a graph"
+
+%Take a sequence. In general, every value in the sequence and its position means 
+%something, as do their relative positions. But if we know \textit{a priori} 
+%that, say, it satisfies the Markov property.
+
+%A node in a graph, tree, or sequence can be described by 1) the immediate 
+%properties of the node (label, attributes, etc.) and 2) the properties of the 
+%edges of the node, including position. Local to a single node, what information 
+%do we need / what does the node contribute to the overall graph?
+
+%%g(X) = P(X) + g(N(X))
+
+%%P(V_i) = P(V_k \forall k, k \neq i)
+
+%LSTMs are useful in that they theoretically remember the entire prefix sequence.  
+%But what if we don't \textit{need} that entire prefix sequence. Or what if the 
+%sequence is long enough that we run into the practical memory limit? Or 
+%subtleties for which there may not be enough data for the LSTM to pick up on.
+
+%An ideal decomposition has: 1) short sequences, 2) few node dependencies, 3) 
+%fewer direct node dependencies.
+
+%% This is all explained from an encoding perspective. What about decoding?
+
+%What do we know about the underlying distribution?
+
+%Parent:
+%1->2->3
+%1->2->4
+%1->5->6
+%1->5->7
+
+%Sibling:
+%2->5
+%3->4
+%6->7
+
+%More parallelizable, less memory, the 1->5 connection is explicit
+
+%Linear:
+%1->2->3->4->5->6->7 (maybe this is good enough if we already know the prior ones)
+%7->6->5->4->3->2->1
+%1->2->3->u->4->u->u->5->6->u->7 (1 is far from five)
+
+%Child:
+%3->2
+
+%Children:
+%(3+4)->2
+%(6+7)->5
+%(2+5)->1
+
+%Decomposition should never have two different outputs for the same node?
+
+%\begin{align}
+%	g(V_i) &= g\left(\left\{ V_k \mid k \neq i \right\}\right) \\
+%\end{align}
+
+%A decomposition is so that we don't need to look at every other node.  
+%Restructuring into an AST is already (most of the way towards) a decomposition.  
+%But it doesn't fully describe the problem. Nodes in one subtree depend on those 
+%in another, even if not directly connected.
+
+%Encoder is trying to pick out the features that matter. Different space/manifold
+
+%Relation aka edge type. Parent, left sibling, but also things like ``same 
+%variable''.
+
+%Ideally, with enough data, we should not need to do any decomposition.
+
+%A linearization of the tree is not really a decomposition?
+
+%A node is not just described by the actual edges of the graph. Global state. For 
+%example, in an AST, a variable changed in a sibling subtree still affects the 
+%use of the variable in the current subtree. Additional edges (like sibling 
+%edges) may be valuable, or some edges may be thrown away altogether.
+
+%We want to choose a decomposition that discards inessential relationships and 
+%accentuates important ones, given the current context. Given a family tree where 
+%a disease is passed through the mother, we can construct a tree
+
+%For example, in an AST, a local variable declaration has little to do with a 
+%different function. Appropriate relational decomposition can hopefully follow 
+%from functional decomposition.
+
+
+%A single RNN can only handle sequences in one direction. 
+
+%Decompose a tree into several, independent RNNs. Does not depend on edges of 
+%tree graph. The model is limited to being able to describe/distinguish nodes 
+%just by the combination of the prefixes leading to them (by induction).
+
+%What if a decomposition has multiple inputs? For example, we might want to 
+%describe a node by its (unbounded) children. TreeLSTM, the decomposition just 
+%takes multiple inputs, or a further decomposition?
+
+%Almost all of the techniques from linear sequence RNN applications now directly 
+%translate to the decomposed tree case (...except TreeLSTM. Oh, but since the one 
+%direction of TreeLSTM reduces to LSTM anyway, it actually is easy).  
+%Bidirectionality, etc.
+
+%uu
+
+%In the general case, the hidden state of the current node can depend on any 
+%subset of prior nodes in the sequence.  But depending on context, we can often 
+%apply constraints to improve structure. Why? Speed up training, require fewer 
+%examples, etc. For example, in program repair, we can ignore many nodes from 
+%collateral subtrees. A local variable from one function is unlikely to have any 
+%impact on a local variable in another function. Commutative operations. Etc.
+
+%The hidden state can
+
+
+
+%Ordering over the tree is consistent with a relation if relations are visited in 
+%the appropriate order.
+
+%Relation is composable, and the orderings are then restricted to what satisfies 
+%both.
+
+%Ordering over the tree is consistent with a decomposition if 
+
+%A decoder can use any consistent ordering to generate the nodes (note that the 
+%original input does not have to be provided from 
+
+
+\subsection{Doubly-recurrent neural networks}
+\include{figures/broken}
+
+Doubly-recurrennt neural networks (DRNNs) are a direct application of relational 
+decomposition, decoding a node with relations corresponding to ``parent'' and 
+``left sibling'' (see \figref{fig:broken}). As seen here, DRNNs introduce the 
+notion of direct topology prediction. Though this is implemented in our 
+framework, we note that it is distinct from relational decomposition, andspecial 
+end-of-sequence tokens can also be used to predict topology.
+
+Unfortunately, as presented, DRNNs are insufficient for decoding ASTs. Because 
+of the indepedence of the two decoding directions, all subtrees with the same 
+root label must be identical. It is impossible to decode a program with, say, 
+two differing variable assignment statements in a row, or two functions that 
+don't have identical bodies.
+%Put another way, a DRNN cannot discriminate between two programs that differ in 
+%such ways.
+
+%There is a fundametal issue. For example, in the context of program repair, if 
+%B represents the head of an If.
+
+% TODO: find paper name
+% https://arxiv.org/pdf/1809.01854.pdf
+Paper XYZ tries to fix this by adding in a reference to the parent. But that 
+ultimately just pushes the problem farther down the line: nodes with the same 
+no-sibling parent and same grandparent have to produce identical subtrees.
+
+We propose two fixes. First, we can add in some form of linearization of the 
+AST, as in Figure %TODO.
+
+However, a linearization suffers from the fact that the relation effectively has 
+little structure to work with and must learn over long distances.
+
+
+Our second fix is seen in Figure %TODO.
+Here, we are defining a \textit{functional relation}. In particular, we are 
+extracting the subtree state from the most recently completed subtree. This 
+requires the (reflexive) transitive closure of the parent relation, composed 
+with the left sibling relation, (with two separate RNNNs).  The subtree state 
+represents a summary
+
+%subtree(reflexive_transitive_closure
+
+To do so, we introduce another relational operator: functional dependence.
+
+
+% \subsection{Decoding fixes}
+% Linearization:
+% For example, either the in-order or pre-order traversals.
+
+% Collateral Lineage: Use TreeLSTM to generate a summary of the left sibling 
+% subtree. Pass that summary to the left node.
+
+% Link global state changes / variable usages?
+% Actually easier: most nodes have a well-defined number of children, basically 
+% the only leaves are Constants and IDs, can actually run executions. Well-defined 
+% ASTs (as opposed to parse trees). Inject semantic information. Decomposable.  
+% Scope. Compositionality.
+
+%Caveats: variables, Compound, Expression List, Constants
+
+% ......................................................................... }}}1
+
+%\subsection{Bottom-Up Decoding}
+%% ......................................................................... {{{1
+%%See the appendix for a brief explanation.
+
+%Bottom-up TreeLSTM generation: use hidden state to predict node, number of 
+
+%We implemented it, but the task is rather limited given . Just as a proof of 
+%concept, we even use TreeLSTM for nodes that have literally just one child or no 
+%recurrence. That said, we have not found a task on which this is actually 
+%useful. 
+
+%siblings, and whether this fills a hole for a prior part of the tree?  Why is 
+%this useful? Debugging example.
+%% ......................................................................... }}}1
+
+\subsection{Relative attention}
+% .................................... {{{1
+
+\newcommand{\Align}[1]{\mathrm{align}{\parens{#1}}}
+\newcommand{\score}[1]{\mathrm{score}{\parens{#1}}}
+
+Our usual notion of attention uses $h^\star$. However, we can instead attend to 
+the individual $h^r$. Generalizing one particular encantation of attention, we 
+have:
+%For a given step $t$ in decoding, we have (the softmax is over $i$, from $1$ to 
+%$n$).
+% \begin{align*}
+% 	\score{s_{t-1}, \vh^r_i} &= 
+% 	\parens{\rvv_a^r}^\top\tanh{\parens{\rmW^r_a[s_{t-1};\vh^r_i]}}\\
+% 	\Align{y_t,x_i, r} &= \score{s_{t-1},\vh^r_i} \\
+% 	\alpha^r_{t,i} &= \softmax{\parens{\Align{y_t, x_i, r}}} \\
+% 	c^r_{t} &= \sum_{i=1}^n\alpha^r_{t,i}\vh^r_i \\
+% 	c^\star_t &= \phi{\parens{%
+% 		\sum_{\er \in \relations}\left.
+% 			\rmU_a^r \vh^r_i
+% 		\right.
+% 	}}
+% \end{align*}
+
+%Once again, we choose $\phi=\tanh$.
+\begin{align*}
+	\mQ^r &= \rmW_Q^r \times \mX_Q^r \\
+	\mK^r &= \rmW_K^r \times \mX_K^r \\
+	\mV^r &= \rmW_V^r \times \mX_V^r \\
+	\mZ^r &= \softmax{\parens{\frac{\mQ^r \times 
+\parens{\mK^r}^\top}{\sqrt{d_k}}}}\mV^r \\
+	\mZ^\star_t &= \phi{\parens{%
+		\sum_{\er \in \relations}\left.
+			\rmU_a^r \mZ^r
+	\right.}}
+\end{align*}
+
+In practice, we used $\phi=\tanh$.  Aside from the last line, if we ignore the 
+relational superscript and set $\mX_Q=\mX_K=\mX_V=\mX$, this is identical to the 
+self-attention used in Transformer. The last line then aggregates the individual 
+relative attentions for the final context.
+
+Intuitively, by separating the attention components, relative attention provides 
+greater flexibility in alignment within a graph. For example, in a tree with 
+parent and left-sibling relations, we can independently evaluate the height and 
+width alignment.
+
+
+% TODO: cite
+%The extension to relative self-attention is straightforward. Rather than pack 
+%our embeddings $h^\star$ into $\mX$, we instead pack each individual $h^r$, We 
+%could furthermore modify $\mX$ to only contain elements from the path, but we 
+%don't attempt that in this work.
+%
+%We then use $c_i$ in place of $h_i$ when decoding.
+%
+%% TODO: cite attnetionn
+%Attention is just another way of re-encoding inputs, and can also be decomposed.  
+%Rather than calculate attention based on $h_i^\star$, we focus attention over 
+%the individual relative hidden states, and combine the relative attentions to 
+%obtain a final weight for the given hidden state. Alternatively, we could use 
+%this combination of relative attentions directly, not needing to refer back to 
+%the hidden state (is this like Transformer?), but we haven't implemented that.
+%
+%We can also attend to only a subset of the 
+%
+%The weights themselves can vary based on the current position of the node?
+%
+%This generalizes both attention and self-attention.
+
+% TODO: relative attention, since decomposed attention is already taken.
+
+Taking this one step further, we apply relative attention to pointer networks.
+Pointer networks
+%TODO \cite
+work around a limited NN vocabulary by using the highest-weighted input as the 
+output of the current step. For example, in generating an abstract syntax tree, 
+rather than output ``arbitraryIdentifierName'' at some time step, the network 
+can instead say ``output whatever the name of whatever variable was used over 
+here at this place in the code''.
+
+A relational pointer network can more directly encode the notion of where and 
+how the variable was used, rather than the aggregate predictive state vector 
+$\vh^\star$.
+
+A few papers experimented with this method. XYZ used this method. ABC used it 
+over linear.
+
+% ID resolution can either be concurrent with tree generation or can take place 
+% after. This gives the important distinction between decoding and encoding. If 
+% after, the structure of the entire network is really the input to a new decoder, 
+% for decoding IDs. However, this excludes the actual variable being used from 
+% future decoding steps.
+
+% Note that we could also use semantic / execution trace information, or even 
+% combine the two!
+
+% Lke the one paper, we can also feed in the attention context vector to the next 
+% step of decoding. But wait, there's more! The attention context vector can 
+% itself be treated as a relational decomposition, 
+
+% Taking this one step further,
+
+%Finally, when doing bottom-up encoding, this context can be used, too.
+%TreeLSTM attention
+
+
+
+
+% ......................................................................... }}}1
+
+%\subsection{Library Implementation (Trooper)}
+% ......................................................................... {{{1
+
+%Creating fields from relations:
+%In general, can fold over paths
+%
+%At graph level, we specify the functions
+%At node level, we specify the inputs
+%
+%Encoder(sequence):
+%% Automatically attach new RNN of appropriate shape/size, unless one is passed 
+%% in with different parameters or something.
+%% Create_path(converse(forward), reverse_rnn)
+%Fold RNN f over forward path: encoding, parameterized input
+%%Attach RNN r to reverse path
+%
+%Decoder(sequence):
+%Attach RNN d to forward path with initial input tail(encoder(forward_path))
+%prediction = map(pre["forward"], predict_label)
+%if training:
+%	loss = fold(error(label_prediction, actual_label), +)
+%
+%
+%
+%encoder = sequence() % has a "forward" path
+%%encoder.converse("backwards") % can also specify sharing of weights
+%
+%% take initial state from final encoder forward state
+%decoder = sequence(input=(encoder, "forward"))
+%decoder.add_predictor("label", "forward")
+%% alternatively, we don't need "last" if we have end-of-sequence token
+%decoder.add_predictor("last", ["forward", "label"])
+%
+%encoder.feed(input_sequence)
+%if training:
+%	decoder.feed(output_sequence)
+%	loss = decoder.reduce(label_loss)
+%	loss += decoder.reduce(last_loss)
+%else:
+%	% this is where we'd implement beam search
+%	decoder.next = lambda node: \
+%		argmax(node.predictors["label"]) \
+%			if node.predictors["last"] < 0.5 else
+%		None
+%
+%	decoder.get_sequence()
+%
+%%In fact, these are all built in! Passing ``feed'' overrides the notion of 
+%	%"next", so really this could also be written:
+%
+%% map stores the result in the node
+%%encoder.map("combined", lambda node: concat(node["forward"], node["reverse"]))
+%
+%% one way of writing this! Keeps it modular. Basically, doesn't require a back 
+%% arrow into every single decode step
+%decoder.map("context_vector", lambda node: attention(node.edges["input"], 
+%node.edges["forward"]))
+%
+%Attention itself then takes the transitive closure of node.edges["input"]
+%
+%Self attention is even simpler:
+%
+%decoder.map("context_vector", lambda node: attention(node.edges["forward"]))
+%
+%encoder.converse("backwards")
+%decoder = sequence(input=(encoder, ["forwards", "backwards"]))
+%
+%
+%%encoder
+%%attention = functional_relation(encoded_state, decoded_state)
+%%attention.map("weights", softmax(align(encoded_state, decoded_state)))
+%%attention.map("weights", softmax(align(encoded_state, decoded_state)))
+%%context = attention.reduce(lambda node: node["weights"] & 
+%%attention.encoder.transitive_closure("combined")
+%%attention
+%
+%
+%
+%
+%
+%Node
+%----
+%Needs to have a function handle_encoder_forward and handle_encoder_reverse, 
+%which returns the values that each should propagate forward. E.g., for encoding, 
+%can just return the node's label
+%
+%For decoding, we might need to {\tt predict} that label
+%handle_decoder_forward takes the form:
+%	if label is None, predict
+%else:
+%	return label
+%
+%handle_decoder_predict
+%
+%Train:
+%loss = map("label_prediction", label)
+%reduce(loss, +)
+%
+%PNode:
+%Feed loss(
+%
+%Train:
+%Reduce(loss, +)
+
+%Topological reasoning over order pairs of edge relations
+%Topological reasoning as operations over paths of edge relations
+
+%Forces mathematical reasoning about whether something makes sense.
+
+%Relational thinking
+
+%Two distinct parts: relational specifications, and functions over relations
+
+%Simple set of building blocks for working with relations.
+%Mapping vs folding an RNN over a tree
+
+%In many cases, these are homogenous relations, especially if we only have one 
+%node type
+
+%Left-total, right-total
+
+%Random paths?
+
+%General relations: Can provide converse, composition, restrictions.
+%map, reduce, apply
+
+%Is the relation one to one, or one to many (N or ?), or many (N or ?) to one?
+
+%Within specific structures, we can provide more, such as transitive closure if 
+%we know that it is a partial order such as a sequence, tree, or DAG
+
+%Provides composition, intersection, union, higher-order, concatenation, 
+%converse, transitive closure
+
+%Global reasoning vs local reasoning
+%Base Case/inputs?
+
+%inputs = Sequence
+%outputs = Sequence
+%connect(tail(inputs.next), head(outputs.next))
+
+
+%% Separates training from specification of structure
+
+%inputs = Sequence
+%reverse = converse(inputs.next) # also a sequence
+%context_vector = concat(tail(inputs.next), tail(reverse))# a vector
+%connect(context_vector, head(outputs.next)) # optionally automatically transform 
+%to correct size
+%%connect(tail(inputs.next), head(outputs.next))
+%%connect(tail(reverse), head(outputs.next)) # how to handle both?
+
+%hpred = concat(inputs.next, reverse) # a sequence
+%attention = transitive_closure(hpred)
+
+
+%# Every operation is automatically parameterized unless told not to
+%h = merge(hparent, hsibling)
+%predict(h, label)
+%predict(h + label, attr)
+%predict(h + label + attr, topology)
+
+%Predict
+%-------
+%hpred = something
+
+
+
+
+
+%ForwardEncoder(Sequence)
+%------------------------
+%Forward is a Chain
+
+
+
+%Classifier(Vector)
+%------------------
+
+
+%Predict
+%-------
+%Encoder.forward
+
+
+%Decoder(Sequence)
+%-----------------
+
+
+
+%handleforward: Apply LSTM to <label, attr>
+
+%1->2->3->4->5
+
+%Node is a sequence, so:
+%---
+%Relations['Forward'][in/out]
+
+%Label
+%Attr
+
+
+
+
+%Query for terminated paths?
+
+%Sequence: Assumes a single ``next'' operator.
+%Provides forward
+%Backwards is then converse
+
+%Tree: Assumes a single ``children'' operator.
+%Within a tree, we assume relations form a partial order.
+%Provides parent, left-sibling, left-inorder-predecessor, etc.
+
+%Attention is a function over the transitive closure of a given relation.
+
+%Validating the configuration of a model.
+
+
+
+%% Comes closer to aligning the tensorflow computation graph with our visual 
+%% intuition for what's going on.
+%% 1) transform inputs (e.g., actual-word to one-hot, one-hot to word 
+%% embeddings). The notion of a node in the tensorflow graph and in TROOPER are 
+%% sometimes closely aligned. The right level of abstraction is somewhat 
+%% task-specific. The transformation could be its own input type, or we'll leave 
+%% transformations out of the Trooper graph.
+%% 2)
+%% 3) transform outputs (e.g., one-hot to actual word).
+
+%Consider an implementation of a simple unidirectional Seq2Seq.
+
+%We have edge types (see Figure XYZ). Transitive vs not transitive
+
+%Mentally unroll the graph.
+
+%(Input->Encoder)
+%Encoder->Encoder
+%Encoder->Decoder
+%Decoder->Decoder
+%(Decoder->Output)
+
+%Encoder/Decoder are both:
+%Sequence
+%(Input->Internal)
+%(Internal->Internal)
+%(Internal->Output)
+
+%Have no idea as to structure, aside from names of edges.
+
+%Graph:
+%Encoder
+%Decoder
+
+%Single datapoint
+%Subgraph forward_inputs: Sequence(words)
+%Subgraph reverse_inputs: Sequence(reverse(words))
+%Subgraph forward_outputs: Sequence(translation)
+
+%% TODO: sharing weights?
+
+%Subgraph Encoder:
+%% Takes in a graph with (at least) "forward" and "reverse" edges
+%% Define functions over those edges, computing a new graph with those results
+%% What is the ordering?
+%Recurrence?
+%Null start/end of encoding?
+%forward_encoding = f(forward)
+%reverse_encoding = r(reverse)
+
+%Subgraph Decoder:
+%output=[forward_encoding; reverse_encoding]
+%Base case=Concatenate forward_encoding[-1], reverse_encoding[0]
+%forward_decoding = g(output)
+
+
+%% Takes in a graph with "encoded forward", "encoded reverse", and "forward" 
+%% edges
+%Create internal edge between first encoder state and first decoder state
+%Create internal edge between last encoder state and first decoder state
+%Compose relation(Concatenation those two)
+%Create `forward' edge from that to first input
+%Apply function d to forward
+
+
+%Subgraph Predict:
+%prediction = p(forward_decoding)
+%% TOPOLOGY XXX ?
+%% Takes in a graph with "decoded forward" edges.
+%Apply function predict to p
+
+%Subgraph Train:
+%loss = e(prediction, output)
+%Takes in/instantiates outputs and feeds them to decoder
+%Apply loss function L to prediction_outcome
+%total_loss = sum(loss)
+
+%This isn't interesting, because we aren't doing anything particularly 
+%higher-level with relations
+
+%Optimize for matrix multiplication
+
+%Can ignore what encoder is, since we just need edges from it
+
+%DRNN
+%----
+%parent
+%left_sibling
+
+
+%DRNN+SeqC
+%---------
+
+
+
+
+
+%Create edge(encoder_context): encoder->internal relation
+%															(vs encoder->node->internal relation)
+%: RNN
+
+
+
+%Encoder is a sequence
+%Query for inputs
+%Define input->encoding_node function
+%Define encoding_node->encoding_node function
+
+
+
+
+%How to connect subgraphs: query for info from other subgraph by relation?
+
+%A ``node'' is just a convenient type of Subgraph, where edges and internal nodes 
+%are implicit based on fields of the node.
+
+%Subgraph needs to predict topology? Output of a node needs to be a set of new 
+%nodes, and the old nodes relation to the node?
+
+%Dynamic back-edge creation (queries). Everything within a subgraph automatically 
+%gets propelled forward, but queries pull in inputs to do so.
+
+%Query an internal node for some field, and base topology decision on that?
+
+
+%Internal Node (subclass of subgraph):
+%Fields vs topology
+
+
+
+%End-of-sentence vs topology prediction.
+
+%Relational Decomposition kernel vs helpers on top
+
+%Some of these can be readily implemented as just wrappers around Tensorflow 
+%operations/LSTMs/etc.
+
+
+%Adding in bidirectionality:
+
+%Within a subgraph:
+%Attach a function to an edge type. An edge can use whatever's at the source node 
+%as inputs.
+
+
+
+
+
+
+%(A node can be seen as a subgraph, but in the implementation they are currently 
+%distinct.)
+
+%A node is a special case of a graph, where values can only depend on direct 
+%inputs to the node.
+
+%At any node, we automatically have access to all relation data pre and post, as 
+%well as any inputs to our supergraph.
+
+%Specify node fields, and if necessary, how to predict them.
+%Back edges
+%Forward edges
+
+
+%My label is based on (leftsibling,parent)
+%My topology is based on (leftsibling,parent,label)
+
+%Config file
+
+%Subgraph
+
+%Takes advantage of the fact that tensorflow won't evaluate parts of the 
+%computation graph that aren't actually used.
+%Figuring out input edges of new node. As long as we specify the node type that 
+%we're connecting to, that's easy. Forward edges vs back edges.
+
+%Whether something is internal to a node or split across multiple nodes is a 
+%matter of software engineering.
+
+%Aggregation functions over multiple edge types: Sum, average, concatenate, 
+%TreeLSTM, attention
+
+
+%Provides a standardized way of explaining work.
+%Readily visualize inputs, outputs, what's to be predicted, attention, etc..
+
+%A subgraph works within the structure provided by the inputs/outputs
+
+%A graph can create an edge between subgraphs?
+
+%A subgraph takes inputs, which are the only thing that can be queried/create 
+%edges?
+
+%Decoder is itself a black box?
+%Node type?
+
+%h_pred = Relate(Encoder, Concatenate(forward, reverse))
+%attention = Relate(Encoder, Attention(h_pred))
+
+%1 result per terminated path/relation
+
+%Decoder(Encoder.forward)
+%vs
+%Decoder(Attend(Encoder.forward))
+
+%To define a graph G\@:
+%List of names of subgraphs
+%For each subgraph:
+%	Identify RNN for each edge type. Results of edge types are stored at the 
+%	source node.
+%	1) Construct a query for the state from other nodes. For example, `` (this 
+%	implicitly creates edges)
+%	For each node hole, specify 1) the inputs, and 2) the function. We may want to 
+%	predict the label before or after updating the RNN.
+%	2) Topology prediction. The order of them matters.
+%	(For now, everything is a DAG, so we never go back to an old node)
+
+
+%	Combine my left sibling and my parent info to make a predictive vector about 
+%	my state.
+
+%	% Every node has a value, every edge has a type
+%	% Do we only make predictions at nodes?
+
+%	1) edge values
+%	2) topology value?
+
+%	Then, 
+
+%	It's at the graph level that we specify what that means
+
+%	For each edge type (identified by subgraph, relation name)
+
+%		Specify what edge holes are possible? Labels are just edge types that point 
+%		back to input dictionary. (Given this, pointer network become trivial)
+
+%	How to train can automatically be inferred by the possible holes.
+
+%Explicitly state which holes exist during training.
+
+%Inheritance
+
+%Many problems can be inversely transformed to such a form.
+
+
+%Also makes it clear violations of data usage, etc.
+
+%Define the subgraphs. Any node in the subgraph can be addressed by the label in 
+%the subgraph.
+
+
+%Inheritance
+
+%Attend to all nodes
+
+
+
+
+
+%Even just describing some sort of ``fold'' operation over your structure.
+
+%Cleaner separation between structure and functionality.
+
+%An easy way to specify decomposition. 
+
+%Training, validation, and test stuff is outside the scope of the model, as are 
+%hidden unit sizes, etc. Is that true?
+
+%Focus on what really matters: too much time spent actually programming models, 
+%spending 99\% of your time trying to get clean data.
+
+%Training
+%Validation
+%Test
+
+%Converting between models (invertible function to get back to the representation 
+%output you want)
+
+%Many models come down to just specifying an edge type.
+
+%Groups of relations.
+
+%Automatic topological sort.
+
+%The flow of the graph constrains what we can and can't use.
+
+
+%Need to define ordering over the graph.
+
+%Edges from encoder nodes to decoder nodes are different edge types. Directly 
+%work together without any extra effort.
+
+%Inputs / Conditioned-on data
+%----------------------------
+
+%Graph
+%-----
+%Can be readily parallelized by embedding multiple disconnected graphs at the 
+%same time.
+
+%Inputs -> [Hole]
+
+%Edge Hole
+%----
+%Local loss function?
+%Here's how to predict what goes in a hole of this type.
+
+%Decompositions
+%--------------
+%Generalizes equation XYZ
+
+%$h^d$ is ultimately the concatenation of several decompositions of relations.
+
+%Edge/Relation
+%-------------
+%What function does the relation represent?
+%Transitive or nah?
+%Higher-order relations
+%% What operator do I use to validate the relation?
+%What if there's a hole here? How to predict?
+
+
+%Node-local view of info:
+%------------------------
+%How do fill in holes next to this node?
+
+%If something can't be a hole, great!
+
+
+%Need to predict local topology if decoding?
+%In other words, output a set of ``does this edge exist''. Can either be to a 
+%decoded node, or wondering if we have a right-sibling at all.
+%Which node should be visited next?
+%``If this is something I don't know, then do this to predict it''.
+
+%How do we determine flow through the graph?
+
+%A classifier just has an edge type from root to a single node vector 
+
+%Furthermore, we can potentially handle multiple paths at once
+
+%Enter node:
+%Abstract syntax tree, we go as far as to use this to run a step in an 
+%interpreter over the AST, short-circuit beam search,
+
+%Influence direction of beam search, etc.
+
+%Blurs the line between encoding and decoding. We now just have holes.
+
+%Are we allowed to ask the question ``are we decoding?''.
+
+%Leave node
+
+%We predict label and attr separately. That is basically a second node hole.
+
+%Limitations: does not currently batch well. We are literally iterating node by 
+%node
+
+%%This might vary by node type, as well. Specify node type as some boolean? Node 
+%% types can be vectors of differing lengths,
+
+%Can readily use scipy,numpy,tensorflow,etc.\ functionality in the implementation 
+%of any of these things.
+
+%``Connect two nodes if they have this in common''. We literally visit the tree.
+
+
+%Need to define 
+
+%(You can have multiple edges for the same relation if we want to capture 
+%different functionality.)
+
+%When training, we just have some nodes be holes 
+
+%Connect to all nodes of type ``decoder'', or ``noun''
+%I can be a left sibling.
+%I can be a right sibling.
+%I can be a parent.
+%I can have a parent.
+%What might I need to predict?
+%Do I need to predict any local topology?
+
+%Do I know my label? What is the task?
+
+%Other nodes can inspect my state arbitrarily.
+
+%Things like regularizing are outside the scope of a node.
+
+%If What do I do under either of those scenarios?
+%Differences between training time and test time?
+%What if I attend to something for which I haven't yet decoded the output?
+%Do I have to know whether I'm embedding or decoding?
+%BERT (i.e., maskig)
+%Predict my topology: am I the right-most sibling? What information can I use to 
+%make that prediction?
+
+
+%Limitations: Have not yet tried general graphs, non-backprop-able learning, etc.
+
+%Ideally enables easier comparison with other models.
+
+%DAG->Data
+
+%Tree representations of object oriented programming edge relations.
+%																				priors
+%																										expert
+%object oriented programmable edge relations
+
+%Topological reasoning as object-oriented programmable edge relations
+
+%Training representations of objects over edge relations
+%Tensorflow
+%Training relational 
+
+%For any given input and output example, the user provides a list of vectors (in 
+%matrix form), a list of edges (potentially including an edge type), and a 
+%dictionary that maps edge types to: a function for the recurrence, properties of 
+%the edge type (should it use attention, should it be transitive if not directly 
+%specified, etc.)
+
+%We also are in the process of implementing visualization over the attention.  
+%Integrating convolution neural networks is an orthogonal task.
+
+%Sensible defaults.
+
+%Node-specific functions vs not-node-specific functions.
+
+%Specifying encoding vs decoding vs end-to-end. The encoder or the decoder don't 
+%have to be written in the library, but still trained end-to-end.
+
+%Really, the ``kernel'' of the framework is tensorflow-specific, and otherwise 
+%framework agnostic (though it is in Python).
+
+%New functionality built into the library (such as attention using multiple 
+%heads) is immediately applicable to any prior work.
+
+%Currently, the library is a proof of concept, and as such things like batch 
+%processing haven't been implemented. There is support for limited parallelism on 
+%a single machine (such as parsing a tree), but no distributed. and 
+%tensorboard/tensorflow debugging is limited.
+
+%Pointer networks can similarly be encoded without even needing to touch the 
+%kernel.
+
+
+%Alternatively, given a DAG that extends from our own base class, we do also have 
+%something that doesn't require the user needing to manually calculate the stuff.  
+%The benefit of using the DAG is that one can immediately identify 
+
+%For now, the construction of $\vh_i^\star$ is hard-coded, but we're expanding 
+%that.
+
+%Topology prediction is generalized to predicting either 1) if an edge should 
+%exist between two nodes.
+
+%We have a pre-defined list of 
+
+%Furthermore, it warns about things like bidirectionality.
+
+%% TODO: including dictionary translation or not
+
+%Part of the implementation is defining 
+
+%The decomposition framework also allows for easy programming.
+
+%Currently limited to acyclic graphs for decoding.
+
+%Additionally supports composition, higher-order, union,
+
+%Readily works on sequential tasks.
+
+%Paths are parallelizable
+
+%Significant Engineering effort to production
+
+% ......................................................................... }}}1

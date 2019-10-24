@@ -1,0 +1,54 @@
+\section{Related Work}\label{sec:related}
+
+Long short-term memory (LSTM) 
+networks~\citep{Hochreiter:1997:LSM:1246443.1246450}
+
+
+Recurrent neural networks (RNNs) were designed to handle sequential data. The 
+output of an RNN is passed back into the RNN, and can be seen as a form of 
+memory persisting between inputs to the RNN\@. In the original formulation, RNNs 
+suffered from vanishing and exploding gradient problems during training, 
+limiting their usefulness.
+
+Long short-term memory (LSTM), and later the simplified Gated-Recurrent Unit 
+(GRU), effectively solved these problems, opening up a wide range of 
+applications with variable-length inputs, outputs, or both,
+including natural language translation, speech recognition, image captioning, 
+and program analysis. A plethora of variations on the original seq2seq model 
+exist. Of particular note are attention and bidirectionality.  Attention 
+specifically decoder looking at encoder.
+
+Taking attention one step further, the Transformer architecture does away with 
+the recurrence altogether, utilizing just attetion, but extended to within the 
+encoder and decoder.
+Self attention ignores distance between words.
+
+Bidirectionality
+
+However, to take the limit even further, we want to take advantage of structure.  
+Natural language parse trees, abstract syntax trees, hierarchical data 
+(characters->words->sentences->paragraphs->documents)
+
+Tree-based models. Linearized  form.
+
+Encoding: TreeLSTM.
+
+Decoding: DRNN. We delay discussion of DRNN until section.
+
+Only recently have models that combine trees for both the encoding and decoding 
+tasks been proposed.
+
+Structure learning, feature extraction/engineering/selection, relation 
+engineering,
+
+Going beyond trees, recent work has looked at representations for more general 
+graph-based models. Message-passing neural networks
+
+%Seq2Tree, Tree2Seq, Tree2Tree
+
+Work outside of deep learning: Bayesian networks and CRF structure learning. CRF 
+computationally expensive, and we have to have a sense of the latent variables?  
+
+Recent work has even combined the two: CRF-CNN reformulates CRF as a layer in a 
+network.
+

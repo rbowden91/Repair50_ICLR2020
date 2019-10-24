@@ -1,0 +1,174 @@
+%Unrolling a graph to a tree, equivalent to message passing. Identifying loops.
+%DRNN paper claims TreeLSTM can't be used for decoding. Sure it can.
+
+%More general recursive neural networks and structures that work beyond RNNs are  
+%rarer. Seq2Tree, Tree2Seq, Tree2Tree, Graphs
+%Trees reduce "long-term"ness (and functional decomposition)
+
+%Only pass in a bottom-up encoding?
+
+% Generating graphs with cycles/message-passing?
+
+%Variable misuse, assuming all variables exist and don't need to be declared.
+
+%Semantic encoding -> syntactic decoding
+		
+%Decoding can use progressively less information.
+
+%Encoding and decoding can even go in different directions
+
+%Try to have an enncoding that doesn't contain any other bugs.
+
+%Encoding:  all the leaves have different outputs. Hmmm...
+
+%The encoder basically becomes the decoder if trained to just predict `next''
+%token generatively. If not, we need to pass all possible nodes to the decoder 
+%as ``starting points''.
+
+%If two nodes share the same decomposition, then the model can't distinguish 
+%them.
+
+%We move topology prediction to be before the node generation?
+
+%for (int i = 0; i < 10; i++) {
+%	printf("%d\n", i);
+%}
+
+\section{Introduction}\label{sec:introduction}
+
+Traditionally, tasks in program analysis treated source code as a linear 
+sequence of tokens.  Without any further modeling, a recurrent neural network 
+(RNN) trained on such sequences is theoretically able to learn the underlying 
+dependencies---the \textit{structure}---of the sequence elements.  The structure 
+is implicit in the parameters of the RNN and in the values of the hidden states.
+\input{figures/ast}
+
+However, while source code may be linear, its execution is fundamentally 
+nonlinear. A sequential model trained on source code has to learn these 
+nonlinearities, often without any actual sense of a language's semantics.  A 
+program's abstract syntax tree (AST), as seen in Figure~\ref{fig:ast}, is one 
+step closer to modeling the nonlinearity in a program. Recent work has placed 
+increasing emphasis on \textit{explicitly} modeling the underlying structure of 
+such nonlinear data (see Section~\ref{sec:related}).
+
+
+%By explicitly working on parse trees for natural language tasks and abstract 
+%syntax trees (ASTs) for program analysis tasks, we simplify the learning task
+%Even BERT, though linear, removes the directionality bias inherenet in RNNs.  
+%What benefits?  Nonlinearity.  Limits on the ability for the RNN to memorize
+
+
+To this end, we introduce the notion of \textit{relational decomposition}, with 
+which one can readily express complicated dependencies between elements in 
+structured data. At a high level, relational decomposition involves applying 
+prior knowledge to break down structured data into smaller chunks that are 
+individually easier to learn, and then aggregating the results from all chunks. 
+
+For example, if we know in advance that a particular node in a tree only depends 
+on its immediate ancestors, then we can narrow the focus of the learning task to 
+just that relational path through the tree. In decomposing a problem, we find 
+that being able to use relational operators directly is invaluable, such as 
+using composition to specify ``siblings of my parent''. Given these operators, 
+we find that many mechanisms such as attention are readily expressed in 
+relational terms, even without applying relational decomposition.
+
+
+
+%Relational decomposition provides a natural way of modeling trees as 
+%combinations of relationships. For example, doubly-recurrent neural networks 
+%(DRNNs)\cite{alvarez2016tree} decompose nodes into parent paths and 
+%left-sibling paths (see Figure~\ref{fig:broken}).
+%In the case of DRNNs, the relative paths form sequences that can be trained with 
+%two independent RNNs. However, an individual relation may be modeled with 
+%feed-forward neural network, bidirectional RNNs, graph neural networks, or even 
+%a non-deep-learning module.
+
+%A further challenge in modeling source code is arbitrary identifiers. In 
+%section, we demonstrate how relational decomposition over ASTs simplifies this 
+%task.
+%
+%Although we use ASTs as motivating examples throughout the paper, relational 
+%decomposition readily applies to other structured tasks. 
+
+
+%Applications of machine learning to programming offer great promise: bug 
+%detection, automatic program repair, program synthesis, code understanding, 
+%autocompletion, variable name suggestion, program translation, program 
+%analysis, automated test generation, and so on.  However, two properties of 
+%source code present recurring difficulty to modern algorithms: arbitrary 
+%user-defined identifiers and nonlinearity.  Arbitrary identifiers mean that two 
+%variables with the same purpose may not share a name, and also neural networks 
+%have a finite dictionary. We return to the point of arbitrary identifiers later 
+%in the paper, for now focusing on nonlinearity.
+
+
+% int ctr = 0;
+% for (int i = 0; i < 10; i++)
+% for (int j = 0; j < 10; j++)
+% for (int k = 0; k < 10; k++)
+% ctr += 1; return 10;
+
+%" These results suggest that it is the
+%need to integrate structures far apart in the sentence that characterizes the tasks where recursive
+%models surpass recurrent models."
+% \cite{DBLP:journals/corr/LiJH15}
+% Also, outputs are much more likely to compile/be syntactically valid
+
+%In recent years, increasing effort has focused on using the inherent structure 
+%of source code.  In doing so, we can improve training speed and learnability.  
+%However, In general, this requires learning the relationship between 
+%\textit{all} variables in the input and output.  Attempt to model the structure 
+%directly.  Inductive bias
+%
+%The simplest example of a structure is a sequence, for which RNNs (and LSTMs) 
+%have thrived.  They have transformed speech recognition, language translation, 
+%etc.
+
+\input{figures/preorder}
+\input{figures/left_subtree}
+\input{figures/cell}
+
+%Relational decomposition not just as a way of reasoning, but programming.
+
+%\item Step back for encoding, decoding, attention, even residual connections.
+The major contribution of this work is the introduction of the relational 
+decomposition framework. To this end, we:
+
+\begin{itemize}
+% TODO: decomposition over nodes?
+\item formalize the notion of relational decomposition, including an analysis of 
+relational operators decompositions over trees.
+
+\item reframe standard attention mechanisms as a form of higher-order relation.  
+	With this framing, we identify \textit{relative attention} as a natural 
+	generalization of attention over relations.
+	We further apply relative attention to construct a novel relational form of 
+	pointer networks.
+
+\item concretize relational decomposition as a \textit{framework} by providing a 
+library written in Python and Tensorflow that simplifies the task of relational 
+reasoning.
+
+%The library, called {\tt Trooper}, is available at XYZ.
+%Tensorflow library allowing for higher-level reasoning over structured data.
+
+\item cast prior work within the relational decomposition framework.
+	%In particular, doubly-recurrent neural networks (DRNNs) are a simple 
+	%decomposition of trees.  However, we identify a flaw that severely limits the 
+	%applicability of DRNNs to abstract syntax trees, and suggest natural 
+	%extensions to the decomposition that overcome these limitations.
+
+Extensibility
+Modularity
+Reproducability
+Translation to other tasks (we can easily apply it to anything that can feed us 
+a graph of the right form).
+
+\item Evaluate relationally-motivated extensions of prior models.
+\end{itemize}
+
+%Doubly-recurrent neural networks (DRNNs)\cite{alvarez2016tree} are a specific 
+%instance, where the two relations are just the left-sibling and parent. 
+%However, take the example in Figure~\ref{fig:broken}. We are generating the 
+%tree top-down, left-to-right. We have made it all the way to generating node D.
+%
